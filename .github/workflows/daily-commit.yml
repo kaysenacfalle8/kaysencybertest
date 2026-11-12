@@ -1,0 +1,64 @@
+name: Daily commit
+
+on:
+  schedule:
+    # 12:15 UTC every day. Offset from the top of the hour so the run is less
+    # likely to be delayed when many scheduled workflows start at once.
+    - cron: "15 12 * * *"
+  workflow_dispatch:
+
+# contents: write lets the default GITHUB_TOKEN push to main.
+# The repository Actions setting must allow write access as well.
+permissions:
+  contents: write
+
+concurrency:
+  group: daily-commit
+  cancel-in-progress: false
+
+jobs:
+  commit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          token: ${{ secrets.GITHUB_TOKEN }}
+          persist-credentials: true
+
+      - name: Append log line, commit, and push
+        env:
+          GIT_AUTHOR_NAME: kaysenacfalle8
+          GIT_AUTHOR_EMAIL: 203617927+kaysenacfalle8@users.noreply.github.com
+          GIT_COMMITTER_NAME: kaysenacfalle8
+          GIT_COMMITTER_EMAIL: 203617927+kaysenacfalle8@users.noreply.github.com
+        run: |
+          set -euo pipefail
+          # Author and committer must be the repo owner. Do not use github-actions[bot].
+          git config user.name "kaysenacfalle8"
+          git config user.email "203617927+kaysenacfalle8@users.noreply.github.com"
+
+          stamp="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          echo "Committing daily log ${stamp}"
+
+          commit_log() {
+            git fetch origin main
+            git reset --hard origin/main
+            printf -- '- %s\n' "$stamp" >> daily-log.md
+            git add daily-log.md
+            git commit -m "chore: daily log ${stamp}"
+          }
+
+          for attempt in 1 2 3; do
+            commit_log
+            if git push origin HEAD:main; then
+              exit 0
+            fi
+            echo "Push failed (attempt ${attempt}); retrying." >&2
+            if [ "$attempt" -lt 3 ]; then
+              sleep $((attempt * 2))
+            fi
+          done
+          echo "Failed to push daily log to main." >&2
+          exit 1
